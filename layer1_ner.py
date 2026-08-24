@@ -113,35 +113,94 @@ def _nearest_match_distance(pattern, text, pos):
 
 
 def run_layer1(text):
-    entities_to_find = ["PERSON", "EMAIL_ADDRESS", "LOCATION", "IN_AADHAAR", "IN_PAN", "IN_PHONE", "IN_UPI"]
-    results = analyzer.analyze(text=text, language="en", entities=entities_to_find)
+    entities_to_find = ["PERSON","EMAIL_ADDRESS","LOCATION","IN_AADHAAR","IN_PAN","IN_PHONE","IN_UPI",]
+
+    results = analyzer.analyze(
+        text=text,
+        language="en",
+        entities=entities_to_find
+    )
 
     confirmed_results = []
+
     for res in results:
+
+        # ---------------------------------------------------------------
+        # Aadhaar validation
+        # ---------------------------------------------------------------
         if res.entity_type == "IN_AADHAAR":
             candidate = re.sub(r"\s", "", text[res.start:res.end])
-            if not (len(candidate) == 12 and _verhoeff_checksum_valid(candidate)):
-                continue  # failed checksum — not even a plausible candidate
 
-            window_start = max(0, res.start - _CONTEXT_WINDOW_CHARS)
-            window_end = min(len(text), res.end + _CONTEXT_WINDOW_CHARS)
+            if not (
+                len(candidate) == 12
+                and _verhoeff_checksum_valid(candidate)
+            ):
+                continue  # failed checksum
+
+            window_start = max(
+                0,
+                res.start - _CONTEXT_WINDOW_CHARS
+            )
+            window_end = min(
+                len(text),
+                res.end + _CONTEXT_WINDOW_CHARS
+            )
+
             window = text[window_start:window_end]
             pos_in_window = res.start - window_start
 
-            aad_dist = _nearest_match_distance(_AADHAAR_CONTEXT_WORDS, window, pos_in_window)
-            non_dist = _nearest_match_distance(_NON_AADHAAR_CONTEXT_WORDS, window, pos_in_window)
+            aad_dist = _nearest_match_distance(
+                _AADHAAR_CONTEXT_WORDS,
+                window,
+                pos_in_window
+            )
+
+            non_dist = _nearest_match_distance(
+                _NON_AADHAAR_CONTEXT_WORDS,
+                window,
+                pos_in_window
+            )
 
             if aad_dist is None and non_dist is None:
-                res.score = 0.5  # checksum-valid, no context either way — flag but low confidence
-            elif non_dist is not None and (aad_dist is None or non_dist < aad_dist):
-                continue  # nearest label says this is something else — drop it
+                res.score = 0.5
+
+            elif non_dist is not None and (
+                aad_dist is None or non_dist < aad_dist
+            ):
+                continue
+
             else:
-                res.score = 0.95  # nearest context word confirms Aadhaar
+                res.score = 0.95
+
             confirmed_results.append(res)
+
+        # ---------------------------------------------------------------
+        # PAN validation
+        # ---------------------------------------------------------------
+        elif res.entity_type == "IN_PAN":
+            candidate = text[res.start:res.end]
+
+            # PAN must strictly follow:
+            # 5 uppercase letters + 4 digits + 1 uppercase letter
+            if not re.fullmatch(
+                r"[A-Z]{5}[0-9]{4}[A-Z]",
+                candidate
+            ):
+                continue
+
+            confirmed_results.append(res)
+
+        # ---------------------------------------------------------------
+        # All other entities
+        # ---------------------------------------------------------------
         else:
             confirmed_results.append(res)
 
-    anonymized_result = anonymizer.anonymize(text=text, analyzer_results=confirmed_results)
+    anonymized_result = anonymizer.anonymize(
+        text=text,
+        analyzer_results=confirmed_results
+    )
+
     return anonymized_result.text, confirmed_results
 
 
